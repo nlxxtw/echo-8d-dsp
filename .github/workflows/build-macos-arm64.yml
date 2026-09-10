@@ -1,4 +1,4 @@
-name: Build Apple Silicon DSP
+name: Build macOS DSP (universal)
 
 on:
   workflow_dispatch:
@@ -8,11 +8,12 @@ on:
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "scripts/**"
       - ".github/workflows/**"
 
 jobs:
-  macos-arm64:
-    name: macOS Apple Silicon (arm64)
+  macos-universal:
+    name: macOS universal (arm64 + x86_64)
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -21,33 +22,81 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      - name: Build release dylib
+      - name: Build release dylibs
         run: |
+          set -euo pipefail
           rustc -vV
           cargo build --release --target aarch64-apple-darwin
-          mkdir -p dist/macos-arm64
-          cp "target/aarch64-apple-darwin/release/libecho_8d_dsp.dylib" "dist/macos-arm64/echo_8d_dsp.dylib"
-          lipo -info "dist/macos-arm64/echo_8d_dsp.dylib"
-          file "dist/macos-arm64/echo_8d_dsp.dylib"
-          nm -gU "dist/macos-arm64/echo_8d_dsp.dylib" | grep echo_dsp_get_api
-          cp README.md "dist/macos-arm64/README.md"
+          cargo build --release --target x86_64-apple-darwin
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: echo-8d-dsp-macos-arm64
-          path: dist/macos-arm64/
-          if-no-files-found: error
+          mkdir -p dist/macos-arm64 dist/macos-x64 dist/macos-universal
 
-      - name: Pack zip
+          ARM_SRC="target/aarch64-apple-darwin/release/libecho_8d_dsp.dylib"
+          X64_SRC="target/x86_64-apple-darwin/release/libecho_8d_dsp.dylib"
+
+          cp "$ARM_SRC" "dist/macos-arm64/echo_8d_dsp.dylib"
+          cp "$X64_SRC" "dist/macos-x64/echo_8d_dsp.dylib"
+
+          lipo -create -output "dist/macos-universal/echo_8d_dsp.dylib" \
+            "dist/macos-arm64/echo_8d_dsp.dylib" \
+            "dist/macos-x64/echo_8d_dsp.dylib"
+
+          # Ad-hoc sign so Gatekeeper / Electron hardened runtime can dlopen more reliably
+          for f in \
+            dist/macos-arm64/echo_8d_dsp.dylib \
+            dist/macos-x64/echo_8d_dsp.dylib \
+            dist/macos-universal/echo_8d_dsp.dylib
+          do
+            codesign --force --sign - --timestamp=none "$f"
+            xattr -cr "$f" || true
+          done
+
+          echo "==> file / lipo / symbols"
+          for f in \
+            dist/macos-arm64/echo_8d_dsp.dylib \
+            dist/macos-x64/echo_8d_dsp.dylib \
+            dist/macos-universal/echo_8d_dsp.dylib
+          do
+            echo "--- $f"
+            file "$f"
+            lipo -info "$f"
+            codesign -dv --verbose=2 "$f" 2>&1 | head -n 20 || true
+            nm -gU "$f" | grep echo_dsp_get_api
+          done
+
+          cp README.md dist/macos-arm64/README.md
+          cp README.md dist/macos-x64/README.md
+          cp README.md dist/macos-universal/README.md
+          cp scripts/fix-macos-dylib.sh dist/macos-universal/fix-macos-dylib.sh
+          chmod +x dist/macos-universal/fix-macos-dylib.sh
+
+      - name: Pack zips
         run: |
-          cd dist/macos-arm64
-          zip -9 "../echo-8d-dsp-macos-arm64.zip" echo_8d_dsp.dylib README.md
+          set -euo pipefail
+          (
+            cd dist/macos-universal
+            zip -9 "../echo-8d-dsp-macos-universal.zip" echo_8d_dsp.dylib README.md fix-macos-dylib.sh
+          )
+          (
+            cd dist/macos-arm64
+            zip -9 "../echo-8d-dsp-macos-arm64.zip" echo_8d_dsp.dylib README.md
+          )
+          (
+            cd dist/macos-x64
+            zip -9 "../echo-8d-dsp-macos-x64.zip" echo_8d_dsp.dylib README.md
+          )
 
-      - name: Upload zip artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: echo-8d-dsp-macos-arm64-zip
-          path: dist/echo-8d-dsp-macos-arm64.zip
+          name: echo-8d-dsp-macos
+          path: |
+            dist/macos-universal/
+            dist/macos-arm64/
+            dist/macos-x64/
+            dist/echo-8d-dsp-macos-universal.zip
+            dist/echo-8d-dsp-macos-arm64.zip
+            dist/echo-8d-dsp-macos-x64.zip
+          if-no-files-found: error

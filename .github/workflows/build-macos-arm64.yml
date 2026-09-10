@@ -1,0 +1,53 @@
+name: Build Apple Silicon DSP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/**"
+
+jobs:
+  macos-arm64:
+    name: macOS Apple Silicon (arm64)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build release dylib
+        run: |
+          rustc -vV
+          cargo build --release --target aarch64-apple-darwin
+          mkdir -p dist/macos-arm64
+          cp "target/aarch64-apple-darwin/release/libecho_8d_dsp.dylib" "dist/macos-arm64/echo_8d_dsp.dylib"
+          lipo -info "dist/macos-arm64/echo_8d_dsp.dylib"
+          file "dist/macos-arm64/echo_8d_dsp.dylib"
+          nm -gU "dist/macos-arm64/echo_8d_dsp.dylib" | grep echo_dsp_get_api
+          cp README.md "dist/macos-arm64/README.md"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-8d-dsp-macos-arm64
+          path: dist/macos-arm64/
+          if-no-files-found: error
+
+      - name: Pack zip
+        run: |
+          cd dist/macos-arm64
+          zip -9 "../echo-8d-dsp-macos-arm64.zip" echo_8d_dsp.dylib README.md
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-8d-dsp-macos-arm64-zip
+          path: dist/echo-8d-dsp-macos-arm64.zip

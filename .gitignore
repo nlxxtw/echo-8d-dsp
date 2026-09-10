@@ -1,0 +1,11 @@
+/target/
+**/target/
+.DS_Store
+*.pdb
+*.ilk
+*.exp
+*.lib
+.idea/
+.vscode/
+dist/*.zip
+!dist/macos-arm64/README.md

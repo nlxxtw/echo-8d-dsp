@@ -1,4 +1,4 @@
-﻿# macOS 动态 8D（Apple Silicon）
+# macOS 动态 8D（Apple Silicon）
 
 若你手里只有这个目录，也可以导入；**更推荐**用上级目录的：
 

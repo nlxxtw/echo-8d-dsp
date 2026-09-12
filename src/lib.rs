@@ -10,12 +10,12 @@ use std::os::raw::c_char;
 use std::ptr;
 
 const PROVIDER_ID: &str = "echo-8d-dsp";
-const PROVIDER_VERSION: &str = "1.0.0";
+const PROVIDER_VERSION: &str = "1.1.0";
 
 const MANIFEST_JSON: &str = r#"{
   "schemaVersion": 1,
   "displayName": "动态 8D 环绕",
-  "description": "实时旋转声像与双耳延迟，做出会绕头转的 8D / 双耳环绕效果。建议使用耳机。",
+  "description": "实时旋转声像与双耳延迟。耳机预设偏绕头；扬声器预设偏左右扫动、弱双耳延迟。",
   "vendor": "local",
   "resources": [],
   "presets": [
@@ -194,6 +194,138 @@ const MANIFEST_JSON: &str = r#"{
           "ownership": "provider"
         }
       ]
+    },
+    {
+      "id": "speaker-sweep",
+      "label": "音箱左右扫",
+      "description": "扬声器专用：大幅左右扫动，弱双耳延迟，适合音响",
+      "recommendedDevice": "speaker",
+      "controls": [
+        {
+          "id": "period",
+          "type": "number",
+          "label": "旋转周期",
+          "defaultValue": 7,
+          "unit": "秒",
+          "range": { "min": 2, "max": 30, "step": 0.5, "minLabel": "快", "maxLabel": "慢" },
+          "ownership": "provider"
+        },
+        {
+          "id": "depth",
+          "type": "number",
+          "label": "环绕深度",
+          "defaultValue": 92,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        },
+        {
+          "id": "space",
+          "type": "number",
+          "label": "空间混响",
+          "defaultValue": 28,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        },
+        {
+          "id": "wet",
+          "type": "number",
+          "label": "效果比例",
+          "defaultValue": 94,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        }
+      ]
+    },
+    {
+      "id": "speaker-wide",
+      "label": "音箱宽扫",
+      "description": "扬声器专用：更慢更宽的左右移动，混响更少",
+      "recommendedDevice": "speaker",
+      "controls": [
+        {
+          "id": "period",
+          "type": "number",
+          "label": "旋转周期",
+          "defaultValue": 12,
+          "unit": "秒",
+          "range": { "min": 2, "max": 30, "step": 0.5, "minLabel": "快", "maxLabel": "慢" },
+          "ownership": "provider"
+        },
+        {
+          "id": "depth",
+          "type": "number",
+          "label": "环绕深度",
+          "defaultValue": 98,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        },
+        {
+          "id": "space",
+          "type": "number",
+          "label": "空间混响",
+          "defaultValue": 18,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        },
+        {
+          "id": "wet",
+          "type": "number",
+          "label": "效果比例",
+          "defaultValue": 96,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        }
+      ]
+    },
+    {
+      "id": "speaker-pingpong",
+      "label": "音箱快切",
+      "description": "扬声器专用：更快的左右来回，接近乒乓扫动",
+      "recommendedDevice": "speaker",
+      "controls": [
+        {
+          "id": "period",
+          "type": "number",
+          "label": "旋转周期",
+          "defaultValue": 3.5,
+          "unit": "秒",
+          "range": { "min": 2, "max": 30, "step": 0.5, "minLabel": "快", "maxLabel": "慢" },
+          "ownership": "provider"
+        },
+        {
+          "id": "depth",
+          "type": "number",
+          "label": "环绕深度",
+          "defaultValue": 100,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        },
+        {
+          "id": "space",
+          "type": "number",
+          "label": "空间混响",
+          "defaultValue": 12,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        },
+        {
+          "id": "wet",
+          "type": "number",
+          "label": "效果比例",
+          "defaultValue": 97,
+          "unit": "%",
+          "range": { "min": 0, "max": 100, "step": 1 },
+          "ownership": "provider"
+        }
+      ]
     }
   ],
   "controls": []
@@ -356,6 +488,33 @@ fn defaults_for_preset(id: &str) -> Result<(&'static str, Params), String> {
                 depth: 0.88,
                 space: 0.58,
                 wet: 0.90,
+            },
+        )),
+        "speaker-sweep" => Ok((
+            "音箱左右扫",
+            Params {
+                speed_hz: 1.0 / 7.0,
+                depth: 0.92,
+                space: 0.28,
+                wet: 0.94,
+            },
+        )),
+        "speaker-wide" => Ok((
+            "音箱宽扫",
+            Params {
+                speed_hz: 1.0 / 12.0,
+                depth: 0.98,
+                space: 0.18,
+                wet: 0.96,
+            },
+        )),
+        "speaker-pingpong" => Ok((
+            "音箱快切",
+            Params {
+                speed_hz: 1.0 / 3.5,
+                depth: 1.0,
+                space: 0.12,
+                wet: 0.97,
             },
         )),
         _ => Err(format!("unknown preset: {id}")),

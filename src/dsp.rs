@@ -95,15 +95,25 @@ impl Processor {
 
         let speed = self.params.speed_hz.clamp(0.01, 1.5);
         let depth = self.params.depth.clamp(0.0, 1.0);
-        let space = self.params.space.clamp(0.0, 1.0);
+        let space_in = self.params.space.clamp(0.0, 1.0);
         let wet = self.params.wet.clamp(0.0, 1.0);
-        // Speakers: keep rotation milder so it doesn't cancel in the room.
-        let speaker_scale = if self.mode == 1 { 0.55 } else { 1.0 };
-        let depth = depth * speaker_scale;
-        let space = space * if self.mode == 1 { 0.65 } else { 1.0 };
+        let speaker = self.mode == 1;
+
+        // Speakers: wide L/R amplitude sweep, weak ITD (room crosstalk kills binaural cues).
+        // Headphones: full orbit + ITD + far-ear darkening.
+        let space = if speaker { space_in * 0.85 } else { space_in };
+        let itd_scale = if speaker { 0.18 } else { 1.0 };
+        let dark_scale = if speaker { 0.12 } else { 0.55 };
+        // Speaker pan emphasis: push orbit harder so L/R travel is obvious on boxes.
+        let orbit_mix = if speaker {
+            (depth * 1.15).clamp(0.0, 1.0)
+        } else {
+            depth
+        };
 
         let phase_inc = TAU * speed / self.sample_rate;
-        let max_itd = (self.sample_rate * MAX_ITD_MS * 0.001).clamp(1.0, (DELAY_LEN - 2) as f32);
+        let max_itd =
+            (self.sample_rate * MAX_ITD_MS * 0.001 * itd_scale).clamp(0.0, (DELAY_LEN - 2) as f32);
         let lp_coeff = 1.0 - (-2.0 * std::f32::consts::PI * 4200.0 / self.sample_rate).exp();
 
         for frame in 0..frames {
@@ -118,22 +128,39 @@ impl Processor {
             let cos_a = angle.cos();
             let sin_a = angle.sin();
 
-            // Equal-power rotating mono image + retained stereo body.
             let mono = (dry_l + dry_r) * 0.5;
             let side = (dry_l - dry_r) * 0.5;
-            let body_l = mono + side * (1.0 - 0.35 * depth);
-            let body_r = mono - side * (1.0 - 0.35 * depth);
 
-            let orbit_l = mono * (0.5 + 0.5 * cos_a);
-            let orbit_r = mono * (0.5 + 0.5 * sin_a);
+            let (wet_l0, wet_r0) = if speaker {
+                // Equal-power hard-ish L/R sweep for loudspeakers (sin/cos pair).
+                // Keep a little stereo body so it doesn't collapse to mono ping-pong.
+                let body_keep = (1.0 - 0.72 * orbit_mix).clamp(0.15, 1.0);
+                let body_l = mono + side * body_keep;
+                let body_r = mono - side * body_keep;
+                // Constant-power pan: full left when cos≈1, full right when sin≈1.
+                let g_l = (0.5 + 0.5 * cos_a).sqrt();
+                let g_r = (0.5 + 0.5 * sin_a).sqrt();
+                let orbit_l = mono * g_l;
+                let orbit_r = mono * g_r;
+                (
+                    body_l * (1.0 - orbit_mix) + orbit_l * orbit_mix,
+                    body_r * (1.0 - orbit_mix) + orbit_r * orbit_mix,
+                )
+            } else {
+                let body_l = mono + side * (1.0 - 0.35 * depth);
+                let body_r = mono - side * (1.0 - 0.35 * depth);
+                let orbit_l = mono * (0.5 + 0.5 * cos_a);
+                let orbit_r = mono * (0.5 + 0.5 * sin_a);
+                (
+                    body_l * (1.0 - depth) + orbit_l * depth,
+                    body_r * (1.0 - depth) + orbit_r * depth,
+                )
+            };
 
-            // ITD: delay the far ear.
+            // ITD: delay the far side (weak on speakers).
             let itd = sin_a * max_itd * depth;
             let delay_l_samp = if itd > 0.0 { itd } else { 0.0 };
             let delay_r_samp = if itd < 0.0 { -itd } else { 0.0 };
-
-            let wet_l0 = body_l * (1.0 - depth) + orbit_l * depth;
-            let wet_r0 = body_r * (1.0 - depth) + orbit_r * depth;
 
             self.delay_l[self.delay_pos] = wet_l0;
             self.delay_r[self.delay_pos] = wet_r0;
@@ -142,18 +169,14 @@ impl Processor {
             let read_r = Self::read_delay(&self.delay_r, self.delay_pos, delay_r_samp);
             self.delay_pos = (self.delay_pos + 1) % DELAY_LEN;
 
-            // Far-side darkening for headphone externalization.
-            let far_l = (1.0 - cos_a).clamp(0.0, 1.0); // darker when source is more to the right/back
-            let far_r = (1.0 + cos_a).clamp(0.0, 1.0);
-            // Use sin for left/right cue: positive sin => right, darken left.
+            // Far-side darkening (headphone externalization; mild on speakers).
             let dark_l = (sin_a.max(0.0) * depth).clamp(0.0, 1.0);
             let dark_r = ((-sin_a).max(0.0) * depth).clamp(0.0, 1.0);
-            let _ = (far_l, far_r);
 
             self.lp_l += lp_coeff * (read_l - self.lp_l);
             self.lp_r += lp_coeff * (read_r - self.lp_r);
-            let shaped_l = read_l * (1.0 - 0.55 * dark_l) + self.lp_l * (0.55 * dark_l);
-            let shaped_r = read_r * (1.0 - 0.55 * dark_r) + self.lp_r * (0.55 * dark_r);
+            let shaped_l = read_l * (1.0 - dark_scale * dark_l) + self.lp_l * (dark_scale * dark_l);
+            let shaped_r = read_r * (1.0 - dark_scale * dark_r) + self.lp_r * (dark_scale * dark_r);
 
             let (space_l, space_r) = self.tick_space(shaped_l, shaped_r, space);
             let mut out_l = dry_l * (1.0 - wet) + (shaped_l + space_l) * wet;
